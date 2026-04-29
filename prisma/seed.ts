@@ -10,12 +10,12 @@ async function main(): Promise<void> {
 
   // ─── Admin ────────────────────────────────────────────────────────────────
   const adminPassword = await bcrypt.hash('Admin@123', SALT_ROUNDS);
-  const _admin = await prisma.user.upsert({
-    where: { email: 'Admin@directronics.com' },
+  await prisma.user.upsert({
+    where: { email: 'admin@directronics.com' },
     update: {},
     create: {
-      name: 'Hrithik',
-      email: 'hrithik@directronics.com',
+      name: 'Admin',
+      email: 'admin@directronics.com',
       passwordHash: adminPassword,
       role: 'ADMIN',
       isActive: true,
@@ -154,7 +154,7 @@ async function main(): Promise<void> {
   console.log('✅ Seed complete!');
   console.log('');
   console.log('📋 Credentials:');
-  console.log('  Admin:      hrithik@directronics.com     / Admin@123456');
+  console.log('  Admin:      admin@directronics.com     / Admin@123');
   // console.log('  Employee 1: employee1@directronics.com / Employee@123456');
   // console.log('  Employee 2: employee2@directronics.com / Employee@123456');
 }
