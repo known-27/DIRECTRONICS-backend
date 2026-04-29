@@ -1,0 +1,309 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  EMPLOYEE
+}
+
+enum ProjectStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  PAID
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
+enum IdentityDocType {
+  AADHAR
+  PAN
+}
+
+enum PaymentMode {
+  GST
+  CASH
+}
+
+// ─────────────────────────────────────────────
+// Models
+// ─────────────────────────────────────────────
+
+model User {
+  id                String           @id @default(cuid())
+  name              String
+  email             String           @unique
+  passwordHash      String
+  role              Role             @default(EMPLOYEE)
+  isActive          Boolean          @default(true)
+  deletedAt         DateTime?
+  // Extended personal fields
+  fullName          String           @default("")
+  mobileNumber1     String           @default("")
+  mobileNumber2     String?
+  address           String?
+  identityDocType   IdentityDocType?
+  identityDocUrl    String?
+  staticSalary      Int?
+  profilePictureUrl String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  // Relations
+  refreshTokens          RefreshToken[]
+  employeeServiceMapping EmployeeServiceMapping[]
+  projects               Project[]                @relation("EmployeeProjects")
+  approvedProjects       Project[]                @relation("ApprovedByAdmin")
+  payments               Payment[]                @relation("EmployeePayments")
+  processedPayments      Payment[]                @relation("ProcessedByAdmin")
+  paidTransactions       PaymentTransaction[]     @relation("PaidByAdmin")
+  auditLogs              AuditLog[]
+
+  @@index([email])
+  @@index([role, isActive])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Service {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  description   String?
+  fields        Json     // Array of { key, label, type, required }
+  invoicePrefix String?  @db.VarChar(10)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  employeeServiceMapping EmployeeServiceMapping[]
+  formulas               Formula[]
+  projects               Project[]
+
+  @@index([isActive])
+  @@map("services")
+}
+
+model EmployeeServiceMapping {
+  id         String   @id @default(cuid())
+  userId     String
+  serviceId  String
+  formulaId  String?
+  assignedAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id])
+  service   Service  @relation(fields: [serviceId], references: [id])
+  formula   Formula? @relation(fields: [formulaId], references: [id])
+
+  @@unique([userId, serviceId])
+  @@index([userId])
+  @@index([serviceId])
+  @@map("employee_service_mappings")
+}
+
+model Project {
+  id                 String        @id @default(cuid())
+  employeeId         String
+  serviceId          String
+  formulaSnapshotId  String?
+  status             ProjectStatus @default(DRAFT)
+  // New project identification fields
+  projectName        String        @default("")
+  invoiceNumber      String?       @unique
+  startDate          DateTime      @default(now())
+  finishDate         DateTime?
+  completionImageUrl String?
+  // Admin-only financial fields (never returned to employees)
+  paymentMode        PaymentMode?
+  totalProjectPrice  Int?
+  makingCost         Int?
+  manualPayAmount    Int?
+  // Result fields
+  calculatedAmount   Int?
+  approvalNotes      String?
+  notes              String?
+  // Approval tracking
+  approvedById       String?
+  approvedAt         DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  // Relations
+  employee        User             @relation("EmployeeProjects", fields: [employeeId], references: [id])
+  approvedBy      User?            @relation("ApprovedByAdmin", fields: [approvedById], references: [id])
+  service         Service          @relation(fields: [serviceId], references: [id])
+  formulaSnapshot FormulaSnapshot? @relation(fields: [formulaSnapshotId], references: [id])
+  details         ProjectDetail[]
+  payments        Payment[]
+
+  @@index([employeeId, status])
+  @@index([serviceId])
+  @@index([status])
+  @@index([invoiceNumber])
+  @@map("projects")
+}
+
+model ProjectDetail {
+  id         String  @id @default(cuid())
+  projectId  String
+  fieldKey   String
+  fieldValue String
+
+  // Relations
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("project_details")
+}
+
+model Formula {
+  id         String   @id @default(cuid())
+  name       String
+  serviceId  String
+  expression String
+  variables  Json     // Array of { key, label, type, sourceField }
+  version    Int      @default(1)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  service                Service                  @relation(fields: [serviceId], references: [id])
+  snapshots              FormulaSnapshot[]
+  employeeServiceMapping EmployeeServiceMapping[]
+
+  @@index([serviceId, isActive])
+  @@map("formulas")
+}
+
+model FormulaSnapshot {
+  id          String   @id @default(cuid())
+  formulaId   String
+  expression  String
+  variables   Json
+  snapshotAt  DateTime @default(now())
+
+  // Relations
+  formula  Formula   @relation(fields: [formulaId], references: [id])
+  projects Project[]
+
+  @@index([formulaId])
+  @@map("formula_snapshots")
+}
+
+model Payment {
+  id               String        @id @default(cuid())
+  projectId        String
+  employeeId       String
+  // Partial payment tracking
+  calculatedAmount Int           // Total owed — set at approval time
+  totalPaid        Int           @default(0)
+  pendingAmount    Int           // calculatedAmount - totalPaid; maintained on every transaction
+  status           PaymentStatus @default(PENDING)
+  paymentMode      PaymentMode?
+  paidAt           DateTime?     // Set when status becomes PAID
+  notes            String?
+  processedBy      String?       // FK to admin user (legacy name kept for relations)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  // Relations
+  project         Project              @relation(fields: [projectId], references: [id])
+  employee        User                 @relation("EmployeePayments", fields: [employeeId], references: [id])
+  processedByUser User?                @relation("ProcessedByAdmin", fields: [processedBy], references: [id])
+  transactions    PaymentTransaction[]
+
+  @@index([employeeId, status])
+  @@index([projectId])
+  @@index([status])
+  @@map("payments")
+}
+
+model PaymentTransaction {
+  id         String   @id @default(cuid())
+  paymentId  String
+  projectId  String
+  employeeId String
+  paidById   String   // FK to admin user who made the payment
+  amount     Int      // Amount paid in this installment
+  note       String?  // Optional admin note for this transaction
+  paidAt     DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  // Relations
+  payment  Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  paidBy   User    @relation("PaidByAdmin", fields: [paidById], references: [id])
+
+  @@index([paymentId])
+  @@index([projectId])
+  @@index([employeeId])
+  @@map("payment_transactions")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  oldValue  Json?
+  newValue  Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique // stored as bcrypt hash
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+// ─────────────────────────────────────────────
+// Invoice counter — atomic sequential numbering
+// ─────────────────────────────────────────────
+
+model InvoiceCounter {
+  id    Int @id @default(autoincrement())
+  year  Int
+  value Int @default(0)
+
+  @@unique([year])
+  @@map("invoice_counters")
+}
