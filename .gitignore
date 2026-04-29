@@ -14,9 +14,8 @@ build/
 !.env.example
 
 # File uploads (ephemeral local storage)
-uploads/
-/uploads
-temp/
+/uploads/
+/temp/
 
 # Logs
 logs/
