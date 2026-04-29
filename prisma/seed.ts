@@ -9,9 +9,9 @@ async function main(): Promise<void> {
   const SALT_ROUNDS = 12;
 
   // ─── Admin ────────────────────────────────────────────────────────────────
-  const adminPassword = await bcrypt.hash('Admin@7977085526', SALT_ROUNDS);
+  const adminPassword = await bcrypt.hash('Admin@123', SALT_ROUNDS);
   const _admin = await prisma.user.upsert({
-    where: { email: 'hrithik@directronics.com' },
+    where: { email: 'Admin@directronics.com' },
     update: {},
     create: {
       name: 'Hrithik',
