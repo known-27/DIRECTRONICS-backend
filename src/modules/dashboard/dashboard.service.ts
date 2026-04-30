@@ -82,8 +82,9 @@ export const getAdminDashboardService = async () => {
       totalEmployees,
       pendingPaymentsCount:  pendingPayments,
       partialPaymentsCount:  partialPayments,
-      totalPaidAmount:       totalPaidAmount._sum.totalPaid     ?? 0,
-      totalPendingAmount:    totalPendingAmount._sum.pendingAmount ?? 0,
+      totalPaidAmount:       totalPaidAmount._sum.totalPaid        ?? 0,
+      totalPendingAmount:    totalPendingAmount._sum.pendingAmount  ?? 0,
+      totalPendingToPay:     totalPendingAmount._sum.pendingAmount  ?? 0,
     },
     pendingReviewCount,
     projectsByStatus: Object.fromEntries(projectsByStatus.map((p) => [p.status, p._count.id])),
@@ -104,6 +105,7 @@ export const getEmployeeDashboardService = async (employeeId: string) => {
   const [
     projectCounts,
     paymentAggregates,
+    pendingToReceiveResult,
     recentProjects,
   ] = await Promise.all([
     prisma.project.groupBy({
@@ -112,7 +114,7 @@ export const getEmployeeDashboardService = async (employeeId: string) => {
       _count: { id: true },
     }),
 
-    // Single aggregate call for all three monetary KPIs
+    // Aggregate for all monetary KPIs (across all payment statuses)
     prisma.payment.aggregate({
       where: { employeeId },
       _sum:  {
@@ -120,6 +122,15 @@ export const getEmployeeDashboardService = async (employeeId: string) => {
         totalPaid:        true,
         pendingAmount:    true,
       },
+    }),
+
+    // Scoped pending: only PENDING + PARTIAL payments (excludes PAID and CANCELLED)
+    prisma.payment.aggregate({
+      where: {
+        employeeId,
+        status: { in: ['PENDING', 'PARTIAL'] },
+      },
+      _sum: { pendingAmount: true },
     }),
 
     prisma.project.findMany({
@@ -137,11 +148,12 @@ export const getEmployeeDashboardService = async (employeeId: string) => {
 
   return {
     kpis: {
-      totalProjects:    Object.values(statusMap).reduce((a, b) => a + b, 0),
-      approvedProjects: statusMap['APPROVED'] ?? 0,
-      totalEarned:      paymentAggregates._sum.calculatedAmount ?? 0,
-      totalReceived:    paymentAggregates._sum.totalPaid        ?? 0,
-      totalPending:     paymentAggregates._sum.pendingAmount    ?? 0,
+      totalProjects:          Object.values(statusMap).reduce((a, b) => a + b, 0),
+      approvedProjects:       statusMap['APPROVED'] ?? 0,
+      totalEarned:            paymentAggregates._sum.calculatedAmount ?? 0,
+      totalReceived:          paymentAggregates._sum.totalPaid        ?? 0,
+      totalPending:           paymentAggregates._sum.pendingAmount    ?? 0,
+      totalPendingToReceive:  pendingToReceiveResult._sum.pendingAmount ?? 0,
     },
     projectsByStatus: statusMap,
     recentProjects,
